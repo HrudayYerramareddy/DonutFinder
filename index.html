@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pokémon Rainbow Donut Finder (Fast)</title>
+<style>
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 20px; max-width: 1200px; }
+input, select, button { font: inherit; }
+.card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 10px; }
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid #eee; padding: 6px; text-align: left; vertical-align: top; }
+th { background: #fafafa; position: sticky; top: 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas; }
+.muted { color: #666; }
+.btn { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; }
+.btn:hover { background: #fafafa; }
+.pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; margin-left:8px; }
+.kpi { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+</style>
+</head>
+<body>
+<h1>🍩 Pokemon Legends ZA Rainbow Donut Finder</h1>
+<p class="muted">
+Enter how many of each <b>Hyper Berry</b> you own, choose <b>two flavors</b>, and a <b>minimum star level</b>.
+A donut is <b>Rainbow</b> if the two flavor values match.
+The solver returns <b>all optimal recipes</b> at the <b>minimum berries used</b> and makes sure the <b>Flavor Score</b> meets the star threshold.
+</p>
+
+<div class="card">
+<h2>1) Your Berry Inventory</h2>
+<div class="row" style="margin-bottom:10px;">
+<button class="btn" id="saveNow">Save now</button>
+<button class="btn" id="resetZero">Reset all to 0</button>
+<button class="btn" id="clearSaved">Clear saved</button>
+<span class="muted" id="saveStatus"></span>
+</div>
+<div class="grid" id="inventory"></div>
+</div>
+
+<div class="card">
+<h2>2) Rainbow Settings</h2>
+<div class="row">
+<label>Flavor A<br/>
+<select id="flavorA">
+<option>SPICY</option><option>SWEET</option><option>BITTER</option><option>SOUR</option><option>FRESH</option>
+</select>
+</label>
+
+<label>Flavor B<br/>
+<select id="flavorB">
+<option>SWEET</option><option>SPICY</option><option>BITTER</option><option>SOUR</option><option>FRESH</option>
+</select>
+</label>
+
+<label>Minimum Stars<br/>
+<select id="minStars">
+<option value="1">1★</option>
+<option value="2">2★</option>
+<option value="3">3★</option>
+<option value="4">4★</option>
+<option value="5">5★</option>
+</select>
+</label>
+
+<label>Max berries to try <br/>
+<input id="maxTry" type="number" min="1" max="8" value="8" />
+</label>
+
+
+<button class="btn" id="run">Find Optimal Donuts</button>
+</div>
+<div class="muted" id="starHint" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+<h2>Top Picks</h2>
+<div class="kpi" id="topPicks"></div>
+</div>
+
+<div class="card">
+<h2>Recipe History</h2>
+<details id="historyDetails" open>
+<summary class="muted">Show / hide used recipes</summary>
+<div class="row" style="margin:10px 0;">
+<button class="btn" id="clearHistory">Clear history</button>
+<span class="muted" id="historyStatus"></span>
+</div>
+<div id="historyList" class="muted"></div>
+</details>
+</div>
+
+<div class="card">
+<h2>All Optimal Results</h2>
+<div id="summary" class="muted"></div>
+<div style="max-height:500px; overflow:auto; border:1px solid #eee; border-radius:8px;">
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Berries Used</th>
+<th>Flavor Totals</th>
+<th>Flavor Score</th>
+<th>Spread</th>
+<th>Recipe</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody id="rows"></tbody>
+</table>
+</div>
+</div>
+
+<script>
+// Star thresholds (flavor score required)
+const STAR_REQ = { 1:120, 2:240, 3:350, 4:700, 5:960 };
+
+// 33 Hyper Berries (flavor stats only)
+const BERRIES = [
+{name:"Hyper Cheri Berry", spicy:40, sweet:0, bitter:0, sour:0, fresh:0},
+{name:"Hyper Chesto Berry", spicy:0, sweet:0, bitter:0, sour:0, fresh:40},
+{name:"Hyper Pecha Berry", spicy:0, sweet:40, bitter:0, sour:0, fresh:0},
+{name:"Hyper Rawst Berry", spicy:0, sweet:0, bitter:40, sour:0, fresh:0},
+{name:"Hyper Aspear Berry", spicy:0, sweet:0, bitter:0, sour:40, fresh:0},
+{name:"Hyper Oran Berry", spicy:20, sweet:10, bitter:25, sour:15, fresh:0},
+{name:"Hyper Persim Berry", spicy:15, sweet:0, bitter:10, sour:15, fresh:20},
+{name:"Hyper Lum Berry", spicy:15, sweet:20, bitter:0, sour:15, fresh:15},
+{name:"Hyper Sitrus Berry", spicy:10, sweet:15, bitter:20, sour:0, fresh:15},
+{name:"Hyper Pomeg Berry", spicy:35, sweet:30, bitter:0, sour:0, fresh:5},
+{name:"Hyper Kelpsy Berry", spicy:0, sweet:5, bitter:30, sour:0, fresh:35},
+{name:"Hyper Qualot Berry", spicy:0, sweet:35, bitter:5, sour:30, fresh:0},
+{name:"Hyper Hondew Berry", spicy:5, sweet:0, bitter:0, sour:35, fresh:30},
+{name:"Hyper Grepa Berry", spicy:60, sweet:0, bitter:0, sour:25, fresh:5},
+{name:"Hyper Tamato Berry", spicy:25, sweet:5, bitter:0, sour:0, fresh:60},
+{name:"Hyper Occa Berry", spicy:0, sweet:60, bitter:5, sour:0, fresh:25},
+{name:"Hyper Passho Berry", spicy:0, sweet:25, bitter:60, sour:5, fresh:0},
+{name:"Hyper Wacan Berry", spicy:5, sweet:0, bitter:25, sour:60, fresh:0},
+{name:"Hyper Rindo Berry", spicy:55, sweet:15, bitter:5, sour:0, fresh:25},
+{name:"Hyper Yache Berry", spicy:0, sweet:25, bitter:15, sour:5, fresh:55},
+{name:"Hyper Chople Berry", spicy:5, sweet:55, bitter:25, sour:15, fresh:5},
+{name:"Hyper Kebia Berry", spicy:15, sweet:0, bitter:55, sour:25, fresh:5},
+{name:"Hyper Shuca Berry", spicy:25, sweet:5, bitter:0, sour:55, fresh:15},
+{name:"Hyper Coba Berry", spicy:95, sweet:10, bitter:10, sour:0, fresh:5},
+{name:"Hyper Payapa Berry", spicy:0, sweet:5, bitter:10, sour:10, fresh:95},
+{name:"Hyper Tanga Berry", spicy:10, sweet:95, bitter:5, sour:10, fresh:0},
+{name:"Hyper Charti Berry", spicy:10, sweet:0, bitter:95, sour:5, fresh:10},
+{name:"Hyper Kasib Berry", spicy:5, sweet:10, bitter:0, sour:95, fresh:10},
+{name:"Hyper Haban Berry", spicy:0, sweet:85, bitter:0, sour:0, fresh:65},
+{name:"Hyper Colbur Berry", spicy:0, sweet:0, bitter:0, sour:65, fresh:85},
+{name:"Hyper Babiri Berry", spicy:0, sweet:0, bitter:85, sour:65, fresh:0},
+{name:"Hyper Chilan Berry", spicy:85, sweet:0, bitter:65, sour:0, fresh:0},
+{name:"Hyper Roseli Berry", spicy:65, sweet:0, bitter:0, sour:85, fresh:0}
+];
+
+// Build inventory UI
+const inventoryDiv = document.getElementById("inventory");
+BERRIES.forEach((b, i) => {
+const d = document.createElement("div");
+d.innerHTML = `<label>${b.name}<br/><input type="number" min="0" value="0" id="b${i}" /></label>`;
+inventoryDiv.appendChild(d);
+});
+
+// ---- Persist inventory in localStorage ----
+const STORAGE_KEY = "rainbow_donut_inventory_v1";
+const HISTORY_KEY = "rainbow_donut_history_v1";
+
+function readInventoryFromInputs() {
+return BERRIES.map((_, i) => Number(document.getElementById(`b${i}`).value || 0));
+}
+
+function writeInventoryToInputs(arr) {
+for (let i = 0; i < BERRIES.length; i++) {
+const v = Array.isArray(arr) ? (arr[i] ?? 0) : 0;
+document.getElementById(`b${i}`).value = v;
+}
+}
+
+function setSaveStatus(msg) {
+const el = document.getElementById("saveStatus");
+if (el) el.textContent = msg;
+}
+
+function saveInventory() {
+const counts = readInventoryFromInputs();
+localStorage.setItem(STORAGE_KEY, JSON.stringify(counts));
+setSaveStatus("Saved ✔");
+}
+
+function loadInventory() {
+const raw = localStorage.getItem(STORAGE_KEY);
+if (!raw) return;
+try {
+const counts = JSON.parse(raw);
+writeInventoryToInputs(counts);
+setSaveStatus("Loaded saved inventory ✔");
+} catch {
+// ignore
+}
+}
+
+function clearSavedInventory() {
+localStorage.removeItem(STORAGE_KEY);
+setSaveStatus("Saved inventory cleared.");
+}
+
+function resetAllToZero() {
+writeInventoryToInputs(new Array(BERRIES.length).fill(0));
+saveInventory();
+}
+
+// ---- Recipe history (localStorage) ----
+function loadHistory() {
+const raw = localStorage.getItem(HISTORY_KEY);
+if (!raw) return [];
+try {
+const arr = JSON.parse(raw);
+return Array.isArray(arr) ? arr : [];
+} catch {
+return [];
+}
+}
+
+function saveHistory(arr) {
+localStorage.setItem(HISTORY_KEY, JSON.stringify(arr));
+}
+
+function setHistoryStatus(msg) {
+const el = document.getElementById("historyStatus");
+if (el) el.textContent = msg;
+}
+
+function escapeHtml(s) {
+return String(s)
+.replaceAll("&", "&amp;")
+.replaceAll("<", "&lt;")
+.replaceAll(">", "&gt;")
+.replaceAll('"', "&quot;")
+.replaceAll("'", "&#39;");
+}
+
+function undoHistoryById(id) {
+const hist = loadHistory();
+const idx = hist.findIndex(h => h.id === id);
+if (idx === -1) return;
+const h = hist[idx];
+
+const ok = window.confirm("Undo this recipe? This will add the berries back to your inventory and remove it from history.");
+if (!ok) return;
+
+// Add berries back
+for (const [berryName, countUsed] of Object.entries(h.recipe || {})) {
+const bIdx = BERRIES.findIndex(b => b.name === berryName);
+if (bIdx === -1) continue;
+const input = document.getElementById(`b${bIdx}`);
+const current = Number(input.value || 0);
+input.value = current + Number(countUsed);
+}
+
+saveInventory();
+setSaveStatus("Undo ✔ (inventory updated)");
+
+// Remove from history
+hist.splice(idx, 1);
+saveHistory(hist);
+setHistoryStatus("Undone ✔");
+renderHistory();
+
+// Refresh results
+document.getElementById("run").click();
+}
+
+function renderHistory() {
+const list = document.getElementById("historyList");
+if (!list) return;
+const hist = loadHistory();
+if (hist.length === 0) {
+list.innerHTML = "<div>No recipes used yet.</div>";
+return;
+}
+
+// newest first
+const items = [...hist].reverse().map((h) => {
+const when = new Date(h.ts).toLocaleString();
+const header = `
+<div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+<div><b>${escapeHtml(h.title || "Used recipe")}</b> <span class="muted">(${when})</span></div>
+<button class="btn historyUndo" data-id="${escapeHtml(h.id || "")}">Undo</button>
+</div>`;
+const meta = `<div class="muted">Settings: ${escapeHtml(h.flavorA)} vs ${escapeHtml(h.flavorB)} • ≥ ${h.minStars}★ • berries=${h.berriesUsed} • score=${h.flavorScore}</div>`;
+const rec = `<div class="mono" style="margin-top:6px;">${escapeHtml(h.recipeText).replaceAll("\n", "<br/>")}</div>`;
+return `<div class="card" style="margin:10px 0;">${header}${meta}${rec}</div>`;
+}).join("");
+
+list.innerHTML = items;
+
+// Hook up Undo buttons
+list.querySelectorAll(".historyUndo").forEach(btn => {
+btn.addEventListener("click", () => {
+const id = btn.getAttribute("data-id");
+if (id) undoHistoryById(id);
+});
+});
+}
+
+document.getElementById("clearHistory")?.addEventListener("click", () => {
+const ok = window.confirm("Clear recipe history?");
+if (!ok) return;
+localStorage.removeItem(HISTORY_KEY);
+setHistoryStatus("History cleared.");
+renderHistory();
+});
+
+// Render history on startup
+renderHistory();
+
+// Auto-save on change (debounced)
+for (let i = 0; i < BERRIES.length; i++) {
+const input = document.getElementById(`b${i}`);
+input.addEventListener("input", () => {
+window.clearTimeout(window.__saveTimer);
+window.__saveTimer = window.setTimeout(saveInventory, 150);
+});
+}
+
+document.getElementById("saveNow")?.addEventListener("click", saveInventory);
+document.getElementById("clearSaved")?.addEventListener("click", clearSavedInventory);
+document.getElementById("resetZero")?.addEventListener("click", resetAllToZero);
+
+// Load saved inventory at startup
+loadInventory();
+
+function scoreOfBerry(b) { return b.spicy + b.sweet + b.bitter + b.sour + b.fresh; }
+
+function spreadStats(recipeObj) {
+const counts = Object.values(recipeObj);
+const maxCount = counts.length ? Math.max(...counts) : 0;
+const sumSquares = counts.reduce((s, c) => s + c*c, 0);
+const distinct = counts.length;
+return { maxCount, sumSquares, distinct };
+}
+
+function recipeToHtml(recipeObj) {
+return Object.entries(recipeObj)
+.sort((a,b)=>a[0].localeCompare(b[0]))
+.map(([n,c])=>`${n} x${c}`)
+.join("<br/>");
+}
+
+function setStarHint() {
+const minStars = Number(document.getElementById("minStars").value);
+document.getElementById("starHint").innerHTML = `Flavor Score required: <span class="mono">${STAR_REQ[minStars]}</span>`;
+}
+
+document.getElementById("minStars").addEventListener("change", setStarHint);
+setStarHint();
+
+// --- NEW LOGIC SUPPORT: chosen flavors must be tied AND be the highest totals ---
+const FLAVORS = ["SPICY","SWEET","BITTER","SOUR","FRESH"];
+function fIndex(name) { return FLAVORS.indexOf(name); }
+
+// Solver: iterative deepening by berry count, collects ALL solutions at the first k that works.
+document.getElementById("run").onclick = () => {
+const A = document.getElementById("flavorA").value;
+const B = document.getElementById("flavorB").value;
+if (A === B) return alert("Choose two different flavors.");
+
+const minStars = Number(document.getElementById("minStars").value);
+const minScore = STAR_REQ[minStars];
+
+// Max berries is always 8 (hard cap). Keep user's input but clamp it.
+const maxTryUser = Math.max(1, Number(document.getElementById("maxTry").value || 20));
+const maxTry = Math.min(8, maxTryUser);
+
+const maxCounts = BERRIES.map((_, i) => Number(document.getElementById(`b${i}`).value || 0));
+const sumInventory = maxCounts.reduce((a,b)=>a+b,0);
+
+if (sumInventory === 0) {
+document.getElementById("summary").textContent = "Enter at least one berry count > 0.";
+document.getElementById("rows").innerHTML = "";
+document.getElementById("topPicks").innerHTML = "";
+return;
+}
+
+const fA = fIndex(A);
+const fB = fIndex(B);
+
+// values[i] = [spicy,sweet,bitter,sour,fresh]
+const values = BERRIES.map(b => [b.spicy, b.sweet, b.bitter, b.sour, b.fresh]);
+const sVal = BERRIES.map(b => scoreOfBerry(b));
+
+// Upper bound helper: add highest-score berries first respecting remaining and inventory.
+const scoreOrder = [...BERRIES.keys()].sort((i,j)=>sVal[j]-sVal[i]);
+
+function maxPossibleAdditionalScore(usedCounts, remaining) {
+let add = 0;
+for (const idx of scoreOrder) {
+if (remaining <= 0) break;
+const available = maxCounts[idx] - usedCounts[idx];
+if (available <= 0) continue;
+const take = Math.min(available, remaining);
+add += take * sVal[idx];
+remaining -= take;
+}
+return add;
+}
+
+const allOptimal = [];
+let optimalK = null;
+
+for (let k = 1; k <= Math.min(maxTry, sumInventory); k++) {
+const usedCounts = new Array(BERRIES.length).fill(0);
+
+function dfs(idx, remaining, totals, scoreSum) {
+if (idx === BERRIES.length) {
+if (remaining === 0 && scoreSum >= minScore) {
+const aTot = totals[fA];
+const bTot = totals[fB];
+const maxTot = Math.max(...totals);
+
+// Rainbow: chosen two are equal AND they are the highest totals (tied for max)
+if (!(aTot > 0 && aTot === bTot && aTot === maxTot)) return;
+
+const recipe = {};
+for (let i = 0; i < usedCounts.length; i++) {
+if (usedCounts[i] > 0) recipe[BERRIES[i].name] = usedCounts[i];
+}
+allOptimal.push({ berriesUsed: k, totalA: aTot, totalB: bTot, flavorScore: scoreSum, recipe });
+}
+return;
+}
+
+// Score pruning
+const maxAdd = maxPossibleAdditionalScore(usedCounts, remaining);
+if (scoreSum + maxAdd < minScore) return;
+
+const limit = Math.min(maxCounts[idx], remaining);
+for (let c = 0; c <= limit; c++) {
+usedCounts[idx] = c;
+
+const nextTotals = totals.slice();
+if (c !== 0) {
+const v = values[idx];
+for (let f = 0; f < 5; f++) nextTotals[f] += c * v[f];
+}
+
+dfs(
+idx + 1,
+remaining - c,
+nextTotals,
+scoreSum + c * sVal[idx]
+);
+usedCounts[idx] = 0;
+}
+}
+
+dfs(0, k, [0,0,0,0,0], 0);
+if (allOptimal.length > 0) { optimalK = k; break; }
+}
+
+const rows = document.getElementById("rows");
+rows.innerHTML = "";
+
+if (!optimalK) {
+document.getElementById("summary").textContent =
+`No rainbow donut found up to ${Math.min(maxTry, sumInventory)} berries for ≥ ${minStars}★.`;
+document.getElementById("topPicks").innerHTML = "";
+return;
+}
+
+// Sort: least flavor score first (all have same berriesUsed)
+allOptimal.sort((x,y)=> x.flavorScore - y.flavorScore);
+
+const bestLeast = allOptimal[0];
+const bestBalanced = [...allOptimal].sort((r1, r2) => {
+const s1 = spreadStats(r1.recipe);
+const s2 = spreadStats(r2.recipe);
+if (s1.maxCount !== s2.maxCount) return s1.maxCount - s2.maxCount;
+if (s1.sumSquares !== s2.sumSquares) return s1.sumSquares - s2.sumSquares;
+if (s1.distinct !== s2.distinct) return s2.distinct - s1.distinct;
+return r1.flavorScore - r2.flavorScore;
+})[0];
+
+const tp = document.getElementById("topPicks");
+tp.innerHTML = "";
+
+function pickCard(title, r, tag) {
+const st = spreadStats(r.recipe);
+const div = document.createElement("div");
+div.className = "card";
+div.innerHTML = `
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+<div><b>${title}</b> <span class="pill">${tag}</span></div>
+<div class="muted">${r.berriesUsed} berries</div>
+</div>
+<div class="muted" style="margin-top:6px;">
+<span class="mono">${A}=${r.totalA}</span>, <span class="mono">${B}=${r.totalB}</span> • Flavor Score <span class="mono">${r.flavorScore}</span>
+</div>
+<div class="muted" style="margin-top:6px;">Spread: max per berry <span class="mono">${st.maxCount}</span>, distinct <span class="mono">${st.distinct}</span></div>
+<div class="mono" style="margin-top:8px;">${recipeToHtml(r.recipe) || "(none)"}</div>
+`;
+return div;
+}
+
+tp.appendChild(pickCard("Best (fewest berries)", bestLeast, "Optimal"));
+tp.appendChild(pickCard("Best (most balanced)", bestBalanced, "Recommended"));
+
+function applyRecipe(r) {
+const ok = window.confirm("Did you use this recipe? This will subtract the used berries from your inventory.");
+if (!ok) return;
+
+// Subtract from inventory inputs (never below 0)
+for (const [berryName, countUsed] of Object.entries(r.recipe)) {
+const idx = BERRIES.findIndex(b => b.name === berryName);
+if (idx === -1) continue;
+const input = document.getElementById(`b${idx}`);
+const current = Number(input.value || 0);
+input.value = Math.max(0, current - Number(countUsed));
+}
+
+// Persist inventory
+saveInventory();
+setSaveStatus("Applied recipe ✔ (inventory updated)");
+
+// Add to history
+const hist = loadHistory();
+const flavorA = document.getElementById("flavorA").value;
+const flavorB = document.getElementById("flavorB").value;
+const minStars = Number(document.getElementById("minStars").value);
+const entry = {
+id: (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + "_" + String(Math.random()).slice(2),
+ts: Date.now(),
+title: "Used recipe",
+flavorA,
+flavorB,
+minStars,
+berriesUsed: r.berriesUsed,
+flavorScore: r.flavorScore,
+recipe: r.recipe,
+recipeText: Object.entries(r.recipe).map(([n,c]) => `${n} x${c}`).join("\n")
+};
+hist.push(entry);
+if (hist.length > 200) hist.splice(0, hist.length - 200);
+saveHistory(hist);
+setHistoryStatus("Added to history ✔");
+renderHistory();
+
+// Re-run solver so results reflect new inventory
+document.getElementById("run").click();
+}
+
+// Top-pick cards clickable
+const pickCards = tp.querySelectorAll(".card");
+if (pickCards[0]) pickCards[0].style.cursor = "pointer";
+if (pickCards[1]) pickCards[1].style.cursor = "pointer";
+if (pickCards[0]) pickCards[0].addEventListener("click", () => applyRecipe(bestLeast));
+if (pickCards[1]) pickCards[1].addEventListener("click", () => applyRecipe(bestBalanced));
+
+// Results table with Use buttons
+allOptimal.forEach((r, i) => {
+const tr = document.createElement("tr");
+const st = spreadStats(r.recipe);
+
+const useBtn = document.createElement("button");
+useBtn.className = "btn";
+useBtn.textContent = "Use";
+useBtn.addEventListener("click", (e) => {
+e.stopPropagation();
+applyRecipe(r);
+});
+
+tr.innerHTML = `
+<td>${i+1}</td>
+<td>${r.berriesUsed}</td>
+<td><span class="mono">${A}=${r.totalA}</span>, <span class="mono">${B}=${r.totalB}</span></td>
+<td><span class="mono">${r.flavorScore}</span></td>
+<td class="muted">max=${st.maxCount}, distinct=${st.distinct}</td>
+<td class="mono">${recipeToHtml(r.recipe) || "(none)"}</td>
+`;
+
+const actionTd = document.createElement("td");
+actionTd.appendChild(useBtn);
+tr.appendChild(actionTd);
+rows.appendChild(tr);
+});
+
+document.getElementById("summary").textContent =
+`Found ${allOptimal.length} optimal rainbow donuts using ${optimalK} berries (≥ ${minStars}★). Showing all optimal recipes only.`;
+};
+</script>
+</body>
+</html>
