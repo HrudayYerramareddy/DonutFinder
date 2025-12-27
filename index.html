@@ -69,7 +69,6 @@ The solver returns <b>all optimal recipes</b> at the <b>minimum berries used</b>
 <input id="maxTry" type="number" min="1" max="8" value="8" />
 </label>
 
-
 <button class="btn" id="run">Find Optimal Donuts</button>
 </div>
 <div class="muted" id="starHint" style="margin-top:8px;"></div>
@@ -101,6 +100,7 @@ The solver returns <b>all optimal recipes</b> at the <b>minimum berries used</b>
 <tr>
 <th>#</th>
 <th>Berries Used</th>
+<th>Can Make</th>
 <th>Flavor Totals</th>
 <th>Flavor Score</th>
 <th>Spread</th>
@@ -195,9 +195,7 @@ try {
 const counts = JSON.parse(raw);
 writeInventoryToInputs(counts);
 setSaveStatus("Loaded saved inventory ✔");
-} catch {
-// ignore
-}
+} catch {}
 }
 
 function clearSavedInventory() {
@@ -266,8 +264,6 @@ hist.splice(idx, 1);
 saveHistory(hist);
 setHistoryStatus("Undone ✔");
 renderHistory();
-
-// Refresh results
 document.getElementById("run").click();
 }
 
@@ -280,7 +276,6 @@ list.innerHTML = "<div>No recipes used yet.</div>";
 return;
 }
 
-// newest first
 const items = [...hist].reverse().map((h) => {
 const when = new Date(h.ts).toLocaleString();
 const header = `
@@ -295,7 +290,6 @@ return `<div class="card" style="margin:10px 0;">${header}${meta}${rec}</div>`;
 
 list.innerHTML = items;
 
-// Hook up Undo buttons
 list.querySelectorAll(".historyUndo").forEach(btn => {
 btn.addEventListener("click", () => {
 const id = btn.getAttribute("data-id");
@@ -312,10 +306,8 @@ setHistoryStatus("History cleared.");
 renderHistory();
 });
 
-// Render history on startup
 renderHistory();
 
-// Auto-save on change (debounced)
 for (let i = 0; i < BERRIES.length; i++) {
 const input = document.getElementById(`b${i}`);
 input.addEventListener("input", () => {
@@ -328,7 +320,6 @@ document.getElementById("saveNow")?.addEventListener("click", saveInventory);
 document.getElementById("clearSaved")?.addEventListener("click", clearSavedInventory);
 document.getElementById("resetZero")?.addEventListener("click", resetAllToZero);
 
-// Load saved inventory at startup
 loadInventory();
 
 function scoreOfBerry(b) { return b.spicy + b.sweet + b.bitter + b.sour + b.fresh; }
@@ -356,11 +347,9 @@ document.getElementById("starHint").innerHTML = `Flavor Score required: <span cl
 document.getElementById("minStars").addEventListener("change", setStarHint);
 setStarHint();
 
-// --- NEW LOGIC SUPPORT: chosen flavors must be tied AND be the highest totals ---
 const FLAVORS = ["SPICY","SWEET","BITTER","SOUR","FRESH"];
 function fIndex(name) { return FLAVORS.indexOf(name); }
 
-// Solver: iterative deepening by berry count, collects ALL solutions at the first k that works.
 document.getElementById("run").onclick = () => {
 const A = document.getElementById("flavorA").value;
 const B = document.getElementById("flavorB").value;
@@ -369,8 +358,7 @@ if (A === B) return alert("Choose two different flavors.");
 const minStars = Number(document.getElementById("minStars").value);
 const minScore = STAR_REQ[minStars];
 
-// Max berries is always 8 (hard cap). Keep user's input but clamp it.
-const maxTryUser = Math.max(1, Number(document.getElementById("maxTry").value || 20));
+const maxTryUser = Math.max(1, Number(document.getElementById("maxTry").value || 8));
 const maxTry = Math.min(8, maxTryUser);
 
 const maxCounts = BERRIES.map((_, i) => Number(document.getElementById(`b${i}`).value || 0));
@@ -386,11 +374,9 @@ return;
 const fA = fIndex(A);
 const fB = fIndex(B);
 
-// values[i] = [spicy,sweet,bitter,sour,fresh]
 const values = BERRIES.map(b => [b.spicy, b.sweet, b.bitter, b.sour, b.fresh]);
 const sVal = BERRIES.map(b => scoreOfBerry(b));
 
-// Upper bound helper: add highest-score berries first respecting remaining and inventory.
 const scoreOrder = [...BERRIES.keys()].sort((i,j)=>sVal[j]-sVal[i]);
 
 function maxPossibleAdditionalScore(usedCounts, remaining) {
@@ -419,7 +405,7 @@ const aTot = totals[fA];
 const bTot = totals[fB];
 const maxTot = Math.max(...totals);
 
-// Rainbow: chosen two are equal AND they are the highest totals (tied for max)
+// Chosen flavors must be tied AND be the highest totals
 if (!(aTot > 0 && aTot === bTot && aTot === maxTot)) return;
 
 const recipe = {};
@@ -431,7 +417,6 @@ allOptimal.push({ berriesUsed: k, totalA: aTot, totalB: bTot, flavorScore: score
 return;
 }
 
-// Score pruning
 const maxAdd = maxPossibleAdditionalScore(usedCounts, remaining);
 if (scoreSum + maxAdd < minScore) return;
 
@@ -445,12 +430,7 @@ const v = values[idx];
 for (let f = 0; f < 5; f++) nextTotals[f] += c * v[f];
 }
 
-dfs(
-idx + 1,
-remaining - c,
-nextTotals,
-scoreSum + c * sVal[idx]
-);
+dfs(idx + 1, remaining - c, nextTotals, scoreSum + c * sVal[idx]);
 usedCounts[idx] = 0;
 }
 }
@@ -469,8 +449,34 @@ document.getElementById("topPicks").innerHTML = "";
 return;
 }
 
-// Sort: least flavor score first (all have same berriesUsed)
-allOptimal.sort((x,y)=> x.flavorScore - y.flavorScore);
+// Compute how many donuts you can make for each recipe
+function donutsPossible(recipeObj) {
+let best = Infinity;
+for (const [berryName, need] of Object.entries(recipeObj)) {
+const idx = BERRIES.findIndex(b => b.name === berryName);
+if (idx === -1) return 0;
+best = Math.min(best, Math.floor(maxCounts[idx] / Number(need)));
+}
+return best === Infinity ? 0 : best;
+}
+
+for (const r of allOptimal) {
+r.canMake = donutsPossible(r.recipe);
+}
+
+// Sort by canMake DESC, then flavorScore ASC, then spread balance
+allOptimal.sort((x, y) => {
+if (y.canMake !== x.canMake) return y.canMake - x.canMake;
+if (x.flavorScore !== y.flavorScore) return x.flavorScore - y.flavorScore;
+
+const sx = spreadStats(x.recipe);
+const sy = spreadStats(y.recipe);
+if (sx.maxCount !== sy.maxCount) return sx.maxCount - sy.maxCount;
+if (sx.sumSquares !== sy.sumSquares) return sx.sumSquares - sy.sumSquares;
+if (sx.distinct !== sy.distinct) return sy.distinct - sx.distinct;
+
+return x.flavorScore - y.flavorScore;
+});
 
 const bestLeast = allOptimal[0];
 const bestBalanced = [...allOptimal].sort((r1, r2) => {
@@ -510,7 +516,6 @@ function applyRecipe(r) {
 const ok = window.confirm("Did you use this recipe? This will subtract the used berries from your inventory.");
 if (!ok) return;
 
-// Subtract from inventory inputs (never below 0)
 for (const [berryName, countUsed] of Object.entries(r.recipe)) {
 const idx = BERRIES.findIndex(b => b.name === berryName);
 if (idx === -1) continue;
@@ -519,11 +524,9 @@ const current = Number(input.value || 0);
 input.value = Math.max(0, current - Number(countUsed));
 }
 
-// Persist inventory
 saveInventory();
 setSaveStatus("Applied recipe ✔ (inventory updated)");
 
-// Add to history
 const hist = loadHistory();
 const flavorA = document.getElementById("flavorA").value;
 const flavorB = document.getElementById("flavorB").value;
@@ -546,18 +549,15 @@ saveHistory(hist);
 setHistoryStatus("Added to history ✔");
 renderHistory();
 
-// Re-run solver so results reflect new inventory
 document.getElementById("run").click();
 }
 
-// Top-pick cards clickable
 const pickCards = tp.querySelectorAll(".card");
 if (pickCards[0]) pickCards[0].style.cursor = "pointer";
 if (pickCards[1]) pickCards[1].style.cursor = "pointer";
 if (pickCards[0]) pickCards[0].addEventListener("click", () => applyRecipe(bestLeast));
 if (pickCards[1]) pickCards[1].addEventListener("click", () => applyRecipe(bestBalanced));
 
-// Results table with Use buttons
 allOptimal.forEach((r, i) => {
 const tr = document.createElement("tr");
 const st = spreadStats(r.recipe);
@@ -573,6 +573,7 @@ applyRecipe(r);
 tr.innerHTML = `
 <td>${i+1}</td>
 <td>${r.berriesUsed}</td>
+<td><span class="mono">${r.canMake}</span></td>
 <td><span class="mono">${A}=${r.totalA}</span>, <span class="mono">${B}=${r.totalB}</span></td>
 <td><span class="mono">${r.flavorScore}</span></td>
 <td class="muted">max=${st.maxCount}, distinct=${st.distinct}</td>
