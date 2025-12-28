@@ -25,7 +25,7 @@ th { background: #fafafa; position: sticky; top: 0; }
 <h1>🍩 Pokemon Legends ZA Rainbow Donut Finder</h1>
 <p class="muted">
 Enter how many of each <b>Hyper Berry</b> you own, choose <b>two flavors</b>, and a <b>minimum star level</b>.
-A donut is <b>Rainbow</b> if the two flavor values match.
+A donut is <b>Rainbow</b> if the two flavor values match with a score greater than or equal to <b>300</b>.
 The solver returns <b>all optimal recipes</b> at the <b>minimum berries used</b> and makes sure the <b>Flavor Score</b> meets the star threshold.
 </p>
 
@@ -116,6 +116,9 @@ The solver returns <b>all optimal recipes</b> at the <b>minimum berries used</b>
 <script>
 // Star thresholds (flavor score required)
 const STAR_REQ = { 1:120, 2:240, 3:350, 4:700, 5:960 };
+
+// NEW: Minimum per-chosen-flavor total required (A and B totals each must be >= 300)
+const MIN_FLAVOR_TOTAL = 300;
 
 // 33 Hyper Berries (flavor stats only)
 const BERRIES = [
@@ -332,13 +335,13 @@ const distinct = counts.length;
 return { maxCount, sumSquares, distinct };
 }
 
+// Print recipe in BERRIES[] order (Roseli last)
 function recipeToHtml(recipeObj) {
-  return BERRIES
-    .filter(b => (recipeObj[b.name] ?? 0) > 0)
-    .map(b => `${b.name} x${recipeObj[b.name]}`)
-    .join("<br/>");
+return BERRIES
+  .filter(b => (recipeObj[b.name] ?? 0) > 0)
+  .map(b => `${b.name} x${recipeObj[b.name]}`)
+  .join("<br/>");
 }
-
 
 function setStarHint() {
 const minStars = Number(document.getElementById("minStars").value);
@@ -348,6 +351,7 @@ document.getElementById("starHint").innerHTML = `Flavor Score required: <span cl
 document.getElementById("minStars").addEventListener("change", setStarHint);
 setStarHint();
 
+// --- chosen flavors must be tied AND be the highest totals ---
 const FLAVORS = ["SPICY","SWEET","BITTER","SOUR","FRESH"];
 function fIndex(name) { return FLAVORS.indexOf(name); }
 
@@ -406,8 +410,11 @@ const aTot = totals[fA];
 const bTot = totals[fB];
 const maxTot = Math.max(...totals);
 
-// Chosen flavors must be tied AND be the highest totals
+// Must be tied AND be the highest totals (tied for max)
 if (!(aTot > 0 && aTot === bTot && aTot === maxTot)) return;
+
+// NEW: chosen two flavor totals must each be >= 300
+if (aTot < MIN_FLAVOR_TOTAL) return; // (bTot is same as aTot)
 
 const recipe = {};
 for (let i = 0; i < usedCounts.length; i++) {
@@ -450,7 +457,7 @@ document.getElementById("topPicks").innerHTML = "";
 return;
 }
 
-// Compute how many donuts you can make for each recipe
+// How many donuts possible for each recipe
 function donutsPossible(recipeObj) {
 let best = Infinity;
 for (const [berryName, need] of Object.entries(recipeObj)) {
@@ -542,7 +549,10 @@ minStars,
 berriesUsed: r.berriesUsed,
 flavorScore: r.flavorScore,
 recipe: r.recipe,
-recipeText: Object.entries(r.recipe).map(([n,c]) => `${n} x${c}`).join("\n")
+recipeText: BERRIES
+  .filter(b => (r.recipe[b.name] ?? 0) > 0)
+  .map(b => `${b.name} x${r.recipe[b.name]}`)
+  .join("\n")
 };
 hist.push(entry);
 if (hist.length > 200) hist.splice(0, hist.length - 200);
