@@ -333,11 +333,12 @@ return { maxCount, sumSquares, distinct };
 }
 
 function recipeToHtml(recipeObj) {
-return Object.entries(recipeObj)
-.sort((a,b)=>a[0].localeCompare(b[0]))
-.map(([n,c])=>`${n} x${c}`)
-.join("<br/>");
+  return BERRIES
+    .filter(b => (recipeObj[b.name] ?? 0) > 0)
+    .map(b => `${b.name} x${recipeObj[b.name]}`)
+    .join("<br/>");
 }
+
 
 function setStarHint() {
 const minStars = Number(document.getElementById("minStars").value);
